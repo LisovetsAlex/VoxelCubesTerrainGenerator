@@ -7,9 +7,18 @@
 
 enum class EFaceDirection;
 enum class EBlockType;
-class FastNoiseLite;
 class UProceduralMeshComponent;
+class FastNoiseLite;
+class AChunkManager;
+class USceneComponent;
 
+/**
+ * Chunk of blocks
+ * 
+ * It can generate blocks based on the given Noise. It will iterate through the cube
+   block by block until it reaches the desired height. Width * Width * Height iterations.
+ * After generating data, can create mesh based on that data.
+ */
 UCLASS()
 class AChunk : public AActor
 {
@@ -18,35 +27,73 @@ class AChunk : public AActor
 public:
 	AChunk();
 
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Chunk")
+	UPROPERTY(VisibleAnywhere, Category = "Components")
+	TObjectPtr<USceneComponent> RootSceneComponent;
+
+	TObjectPtr<AChunkManager> Manager;
 	int32 BlockSize;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Chunk")
 	int32 Width;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Chunk")
 	int32 Height;
 
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Chunk")
-	float NoiseStrength;
+	TMap<FVector, FBlock> Blocks;
 
-	UFUNCTION(BlueprintCallable, Category = "Chunk")
-	void GenerateChunk(const int32& InBlockSize, const int32& InWidth, const int32& InHeight);
+	/**
+	 * Generates the chunk data based on noise. It does not create the mesh.
+	 *
+	 * @param Noise: A shared pointer to the FastNoiseLite instance used to generate noise values.
+	 */
+	void GenerateChunk(const TSharedPtr<FastNoiseLite>& Noise);
+
+	/**
+	 * Creates the mesh for the chunk using the generated chunk data.
+	 */
+	void CreateChunkMesh();
 
 protected:
 	TObjectPtr<UProceduralMeshComponent> Mesh;
-	TObjectPtr<FastNoiseLite> Noise;
-
-	TMap<FVector, FBlock> Blocks;
 	
 	TArray<FVector> Vertices;
 	TArray<FVector> Normals;
 	TArray<FVector2D> UVs;
 	TArray<int32> Triangles;
 
-	void CreateFaceData(const EFaceDirection& Direction, const FVector& Position);
-	bool IsNextToAir(const EFaceDirection& Direction, const FVector& Position) const;
-	FVector GetDirectionAsValue(const EFaceDirection& Direction) const;
-	void ApplyMesh();
+	/**
+	 * Generates the chunk's mesh data (vertices, triangles, normals, UVs).
+	 */
+	void CreateChunkMeshData();
 
+	/**
+	 * Creates the vertex, normal, and triangle data for a single face of a block.
+	 *
+	 * @param Direction: The direction the face is facing (e.g., Up, Down, North).
+	 * @param Position: The position of the block the face belongs to.
+	 */
+	void CreateFaceData(const EFaceDirection& Direction, const FVector& Position);
+
+	/**
+	 * Checks whether a block face is adjacent to an air block (empty space).
+	 *
+	 * @param Direction: The direction of the face being checked.
+	 * @param Position: The position of the block being checked.
+	 * @return true if the block face is next to air, false otherwise.
+	 */
+	bool IsBlockNextToAir(const EFaceDirection& Direction, const FVector& Position) const;
+
+	/**
+	 * Gets the vector value representing the direction of a block face.
+	 *
+	 * @param Direction: The face direction.
+	 * @return A FVector corresponding to the face direction.
+	 */
+	FVector GetDirectionAsValue(const EFaceDirection& Direction) const;
+
+	/**
+	 * Limits the noise value to within a specified height range.
+	 *
+	 * @param NoiseValue: The original noise value.
+	 * @param MinHeight: The minimum height limit.
+	 * @param MaxHeight: The maximum height limit.
+	 * @return The clamped noise value within the height range.
+	 */
+	float LimitNoise(float NoiseValue, int MinHeight, int MaxHeight) const;
 };

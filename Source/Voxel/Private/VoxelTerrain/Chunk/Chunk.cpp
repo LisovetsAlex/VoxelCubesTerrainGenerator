@@ -4,7 +4,9 @@
 #include "../../Enums/Direction.h"
 #include "../../Structs/Block.h"
 #include "../../FastNoiseLite.h"
+#include "../World/ChunkManager.h"
 #include "ProceduralMeshComponent.h"
+#include "Components/SceneComponent.h"
 
 AChunk::AChunk()
 {
@@ -15,27 +17,49 @@ AChunk::AChunk()
 	Height = 32;
 
 	Mesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("Mesh"));
-	Noise = new FastNoiseLite();
-	Noise->SetFrequency(0.03f);
-	Noise->SetNoiseType(FastNoiseLite::NoiseType_Perlin);
-	Noise->SetFractalType(FastNoiseLite::FractalType_FBm);
-
 	Mesh->SetCastShadow(false);
 
-	RootComponent = Mesh;
+	RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
+
+	RootComponent = RootSceneComponent;
 }
 
-void AChunk::GenerateChunk(const int32& InBlockSize, const int32& InWidth, const int32& InHeight)
+void AChunk::GenerateChunk(const TSharedPtr<FastNoiseLite>& Noise)
 {
-	FVector NextBlockLocation = Mesh->GetRelativeLocation().GridSnap(BlockSize);
+	FVector NextBlockLocation = RootComponent->GetRelativeLocation();
 	float X = NextBlockLocation.X;
 	float Y = NextBlockLocation.Y;
 	int CurrentHeight = 0;
 
-    BlockSize = InBlockSize;
-	Width = InWidth;
-	Height = InHeight;
+	for (int i = 0; i < Height; i++)
+	{
+		CurrentHeight = i;
+		NextBlockLocation = FVector(X, Y, NextBlockLocation.Z).GridSnap(BlockSize);
+		NextBlockLocation = (NextBlockLocation + FVector(0, 0, BlockSize)).GridSnap(BlockSize);
+		X = NextBlockLocation.X;
+		Y = NextBlockLocation.Y;
 
+		for (int j = 0; j < Width; j++)
+		{
+			NextBlockLocation = FVector(X, NextBlockLocation.Y, NextBlockLocation.Z).GridSnap(BlockSize);
+			NextBlockLocation = (NextBlockLocation + FVector(0, BlockSize, 0)).GridSnap(BlockSize);
+
+			for (int k = 0; k < Width; k++)
+			{
+				NextBlockLocation = (NextBlockLocation + FVector(BlockSize, 0, 0)).GridSnap(BlockSize);
+				float BlockHeight = Noise->GetNoise(NextBlockLocation.X / 100, NextBlockLocation.Y / 100);
+				BlockHeight = LimitNoise(BlockHeight, 6, 32);
+
+				(CurrentHeight >= BlockHeight) ?
+					Blocks.Add(NextBlockLocation, FBlock(EBlockType::Air, NextBlockLocation)):
+					Blocks.Add(NextBlockLocation, FBlock(EBlockType::Stone, NextBlockLocation));
+			}
+		}
+	}
+}
+
+void AChunk::CreateChunkMeshData()
+{
 	TArray<EFaceDirection> Directions = {
 		EFaceDirection::X,
 		EFaceDirection::Y,
@@ -44,33 +68,6 @@ void AChunk::GenerateChunk(const int32& InBlockSize, const int32& InWidth, const
 		EFaceDirection::nZ,
 		EFaceDirection::Z,
 	};
-
-	UE_LOG(LogTemp, Warning, TEXT("Starting chunk generation!"));
-
-	for (int i = 0; i < Height; i++)
-	{
-		CurrentHeight = i;
-		NextBlockLocation = FVector(X, Y, NextBlockLocation.Z + BlockSize).GridSnap(BlockSize);
-		X = NextBlockLocation.X;
-		Y = NextBlockLocation.Y;
-
-		for (int j = 0; j < Width; j++)
-		{
-			NextBlockLocation = FVector(X, NextBlockLocation.Y + BlockSize, NextBlockLocation.Z).GridSnap(BlockSize);
-
-			for (int k = 0; k < Width; k++)
-			{
-				NextBlockLocation = NextBlockLocation + FVector(BlockSize, 0, 0).GridSnap(BlockSize);
-				float BlockHeight = Noise->GetNoise(NextBlockLocation.X, NextBlockLocation.Y);
-				BlockHeight = floor(BlockHeight + 1 * NoiseStrength) - 8;
-
-				(CurrentHeight >= BlockHeight) ?
-					Blocks.Add(NextBlockLocation, FBlock(EBlockType::Air, NextBlockLocation)):
-					Blocks.Add(NextBlockLocation, FBlock(EBlockType::Stone, NextBlockLocation));
-			}
-		}
-	}
-
 	TArray<FBlock> BlockData;
 	Blocks.GenerateValueArray(BlockData);
 
@@ -80,14 +77,11 @@ void AChunk::GenerateChunk(const int32& InBlockSize, const int32& InWidth, const
 
 		for (int j = 0; j < Directions.Num(); j++)
 		{
-			if (IsNextToAir(Directions[j], BlockData[i].Location))
-			{
-				CreateFaceData(Directions[j], BlockData[i].Location);
-			}
+			if (!IsBlockNextToAir(Directions[j], BlockData[i].Location)) continue;
+
+			CreateFaceData(Directions[j], BlockData[i].Location);
 		}
 	}
-
-	ApplyMesh();
 }
 
 void AChunk::CreateFaceData(const EFaceDirection& Direction, const FVector& Position)
@@ -164,18 +158,15 @@ void AChunk::CreateFaceData(const EFaceDirection& Direction, const FVector& Posi
 
 
 
-bool AChunk::IsNextToAir(const EFaceDirection& Direction, const FVector& Position) const
+bool AChunk::IsBlockNextToAir(const EFaceDirection& Direction, const FVector& Position) const
 {
 	FVector BlockInDirection = (GetDirectionAsValue(Direction) * BlockSize + Position).GridSnap(BlockSize);
 	if (Blocks.Find(BlockInDirection) != nullptr)
 	{
 		return Blocks[BlockInDirection].Type == EBlockType::Air;
 	}
-	else 
-	{
-		return true;
-	}
-	
+
+	return Manager.Get()->IsBlockAir(GetActorLocation() + GetDirectionAsValue(Direction) * BlockSize * Width, BlockInDirection);
 }
 
 FVector AChunk::GetDirectionAsValue(const EFaceDirection& Direction) const 
@@ -194,8 +185,10 @@ FVector AChunk::GetDirectionAsValue(const EFaceDirection& Direction) const
 	return Directions[Index];
 }
 
-void AChunk::ApplyMesh()
+void AChunk::CreateChunkMesh()
 {
+	CreateChunkMeshData();
+
 	Mesh->CreateMeshSection(
 		0,
 		Vertices, 
@@ -206,4 +199,14 @@ void AChunk::ApplyMesh()
 		TArray<FProcMeshTangent>(), 
 		true
 	);
+}
+
+float AChunk::LimitNoise(float NoiseValue, int MinHeight, int MaxHeight) const
+{
+	float normalizedValue = (NoiseValue + 1.0f) / 2.0f;
+	int voxelHeight = static_cast<int>(normalizedValue * (MaxHeight - MinHeight) + MinHeight);
+
+	voxelHeight = FMath::Clamp(voxelHeight, MinHeight, MaxHeight);
+
+	return voxelHeight;
 }
