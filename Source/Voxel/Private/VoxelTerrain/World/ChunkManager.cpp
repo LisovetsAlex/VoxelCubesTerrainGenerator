@@ -71,9 +71,35 @@ bool AChunkManager::IsBlockAir(const FVector& ChunkLocation, const FVector& Bloc
 	if (!Chunk) return false;
 
 	auto Block = Chunk->Get()->Blocks.Find(BlockLocation.GridSnap(BlockSize));
-	if (Block == nullptr) return false;
+	if (!Block) return false;
 
 	return Block->Type == EBlockType::Air;
+}
+
+void AChunkManager::AddBlock(const FVector& Position, const EBlockType& NewType)
+{
+	for (auto& Pair : GeneratedChunks)
+	{
+		auto Chunk = Pair.Value;
+		if (!Chunk) continue;
+		if (!Chunk->Blocks.Find(Position.GridSnap(BlockSize))) continue;
+
+		Chunk->ModifyBlock(Position, NewType);
+		return;
+	}
+}
+
+void AChunkManager::RemoveBlock(const FVector& Position)
+{
+	for (auto& Pair : GeneratedChunks)
+	{
+		auto Chunk = Pair.Value;
+		if (!Chunk) continue;
+		if (!Chunk->Blocks.Find(Position.GridSnap(BlockSize))) continue;
+
+		Chunk->ModifyBlock(Position, EBlockType::Air);
+		return;
+	}
 }
 
 TObjectPtr<AChunk> AChunkManager::SpawnChunk(const FVector& Location)

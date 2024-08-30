@@ -156,8 +156,6 @@ void AChunk::CreateFaceData(const EFaceDirection& Direction, const FVector& Posi
 	});
 }
 
-
-
 bool AChunk::IsBlockNextToAir(const EFaceDirection& Direction, const FVector& Position) const
 {
 	FVector BlockInDirection = (GetDirectionAsValue(Direction) * BlockSize + Position).GridSnap(BlockSize);
@@ -201,6 +199,52 @@ void AChunk::CreateChunkMesh()
 	);
 }
 
+void AChunk::AddBlockFast(const FVector& Position, const EBlockType& NewType)
+{
+	TArray<EFaceDirection> Directions = {
+		EFaceDirection::X,
+		EFaceDirection::Y,
+		EFaceDirection::nX,
+		EFaceDirection::nY,
+		EFaceDirection::nZ,
+		EFaceDirection::Z,
+	};
+
+	auto Block = Blocks.Find(Position.GridSnap(BlockSize));
+	if (!Block) return;
+
+	Block->Type = NewType;
+
+	for (int j = 0; j < Directions.Num(); j++)
+	{
+		if (!IsBlockNextToAir(Directions[j], Block->Location)) continue;
+
+		CreateFaceData(Directions[j], Block->Location);
+	}
+
+	Mesh->CreateMeshSection(
+		0,
+		Vertices,
+		Triangles,
+		Normals,
+		UVs,
+		TArray<FColor>(),
+		TArray<FProcMeshTangent>(),
+		true
+	);
+}
+
+void AChunk::ModifyBlock(const FVector& Position, const EBlockType& NewType)
+{
+	auto Block = Blocks.Find(Position.GridSnap(BlockSize));
+	if (!Block) return;
+
+	Block->Type = NewType;
+
+	ClearMesh();
+	CreateChunkMesh();
+}
+
 float AChunk::LimitNoise(float NoiseValue, int MinHeight, int MaxHeight) const
 {
 	float normalizedValue = (NoiseValue + 1.0f) / 2.0f;
@@ -209,4 +253,12 @@ float AChunk::LimitNoise(float NoiseValue, int MinHeight, int MaxHeight) const
 	voxelHeight = FMath::Clamp(voxelHeight, MinHeight, MaxHeight);
 
 	return voxelHeight;
+}
+
+void AChunk::ClearMesh()
+{
+	Vertices.Empty();
+	UVs.Empty();
+	Normals.Empty();
+	Triangles.Empty();
 }

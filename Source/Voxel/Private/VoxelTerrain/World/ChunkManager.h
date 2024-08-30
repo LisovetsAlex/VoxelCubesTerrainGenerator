@@ -6,6 +6,7 @@
 
 class FastNoiseLite;
 class AChunk;
+enum class EBlockType : uint8;
 
 /**
  * Manages chunk actions like drawing, generating, adding/removing blocks
@@ -59,6 +60,23 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "ChunkManager")
 	void GenerateChunks();
+
+	/**
+	 * Adds a new Block at a specified location.
+	 *
+	 * @param Position: The location of the new block to place.
+	 * @param NewType: Type of the block.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "ChunkManager")
+	void AddBlock(const FVector& Position, const EBlockType& NewType);
+
+	/**
+	 * Removes a Block at a specified location.
+	 *
+	 * @param Position: The location of the block to remove.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "ChunkManager")
+	void RemoveBlock(const FVector& Position);
 
 	/**
 	 * Checks if a block at the given location in a chunk is an air block.

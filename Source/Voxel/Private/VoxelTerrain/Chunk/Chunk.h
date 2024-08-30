@@ -6,7 +6,7 @@
 #include "Chunk.generated.h"
 
 enum class EFaceDirection;
-enum class EBlockType;
+enum class EBlockType : uint8;
 class UProceduralMeshComponent;
 class FastNoiseLite;
 class AChunkManager;
@@ -48,6 +48,12 @@ public:
 	 * Creates the mesh for the chunk using the generated chunk data.
 	 */
 	void CreateChunkMesh();
+
+	UFUNCTION(BlueprintCallable, Category = "Chunk")
+	void ModifyBlock(const FVector& Position, const EBlockType& NewType);
+
+	UFUNCTION(BlueprintCallable, Category = "Chunk")
+	void AddBlockFast(const FVector& Position, const EBlockType& NewType);
 
 protected:
 	TObjectPtr<UProceduralMeshComponent> Mesh;
@@ -96,4 +102,6 @@ protected:
 	 * @return The clamped noise value within the height range.
 	 */
 	float LimitNoise(float NoiseValue, int MinHeight, int MaxHeight) const;
+
+	void ClearMesh();
 };

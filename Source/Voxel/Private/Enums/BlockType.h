@@ -1,8 +1,9 @@
 #pragma once
 
-enum class EBlockType
+UENUM(BlueprintType)
+enum class EBlockType : uint8
 {
-    Air UMETA(DisplayName="Air"),
-    Grass UMETA(DisplayName="Grass"),
-    Stone UMETA(DisplayName="Stone")
+    Air = 0 UMETA(DisplayName="Air"),
+    Grass = 1 UMETA(DisplayName="Grass"),
+    Stone = 2 UMETA(DisplayName="Stone")
 };
