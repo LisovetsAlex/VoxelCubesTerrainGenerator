@@ -16,12 +16,30 @@ AChunk::AChunk()
 	Width = 32;
 	Height = 32;
 
+	Directions = {
+		EFaceDirection::X,
+		EFaceDirection::Y,
+		EFaceDirection::nX,
+		EFaceDirection::nY,
+		EFaceDirection::nZ,
+		EFaceDirection::Z,
+	};
+
 	Mesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("Mesh"));
 	Mesh->SetCastShadow(false);
 
 	RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
 
 	RootComponent = RootSceneComponent;
+}
+
+
+void AChunk::InitBaseData(const TObjectPtr<AChunkManager>& InManager, int32 InBlockSize, int32 InWidth, int32 InHeight)
+{
+	Manager = InManager;
+	BlockSize = InBlockSize;
+	Width = InWidth;
+	Height = InHeight;
 }
 
 void AChunk::GenerateChunk(const TSharedPtr<FastNoiseLite>& Noise)
@@ -34,16 +52,9 @@ void AChunk::GenerateChunk(const TSharedPtr<FastNoiseLite>& Noise)
 	for (int i = 0; i < Height; i++)
 	{
 		CurrentHeight = i;
-		NextBlockLocation = FVector(X, Y, NextBlockLocation.Z).GridSnap(BlockSize);
-		NextBlockLocation = (NextBlockLocation + FVector(0, 0, BlockSize)).GridSnap(BlockSize);
-		X = NextBlockLocation.X;
-		Y = NextBlockLocation.Y;
-
+		
 		for (int j = 0; j < Width; j++)
 		{
-			NextBlockLocation = FVector(X, NextBlockLocation.Y, NextBlockLocation.Z).GridSnap(BlockSize);
-			NextBlockLocation = (NextBlockLocation + FVector(0, BlockSize, 0)).GridSnap(BlockSize);
-
 			for (int k = 0; k < Width; k++)
 			{
 				NextBlockLocation = (NextBlockLocation + FVector(BlockSize, 0, 0)).GridSnap(BlockSize);
@@ -51,36 +62,105 @@ void AChunk::GenerateChunk(const TSharedPtr<FastNoiseLite>& Noise)
 				BlockHeight = LimitNoise(BlockHeight, 6, 32);
 
 				(CurrentHeight >= BlockHeight) ?
-					Blocks.Add(NextBlockLocation, FBlock(EBlockType::Air, NextBlockLocation)):
-					Blocks.Add(NextBlockLocation, FBlock(EBlockType::Stone, NextBlockLocation));
+					Blocks.Add(NextBlockLocation, EBlockType::Air):
+					Blocks.Add(NextBlockLocation, EBlockType::Stone);
 			}
+
+			NextBlockLocation = FVector(X, NextBlockLocation.Y, NextBlockLocation.Z).GridSnap(BlockSize);
+			NextBlockLocation = (NextBlockLocation + FVector(0, BlockSize, 0)).GridSnap(BlockSize);
+		}
+
+		NextBlockLocation = FVector(X, Y, NextBlockLocation.Z).GridSnap(BlockSize);
+		NextBlockLocation = (NextBlockLocation + FVector(0, 0, BlockSize)).GridSnap(BlockSize);
+		X = NextBlockLocation.X;
+		Y = NextBlockLocation.Y;
+	}
+
+	TArray<FVector> BlockLocs;
+	Blocks.GenerateKeyArray(BlockLocs);
+	TArray<EBlockType> BlockTypes;
+	Blocks.GenerateValueArray(BlockTypes);
+
+	for (int i = 0; i < BlockLocs.Num(); i++)
+	{
+		if (BlockTypes[i] == EBlockType::Air) continue;
+
+		for (int j = 0; j < Directions.Num(); j++)
+		{
+			if (!IsBlockNextToAir(Directions[j], BlockLocs[i])) continue;
+
+			PotentialBlocks.Add(BlockLocs[i], BlockTypes[i]);
 		}
 	}
 }
 
+void AChunk::ModifyBlock(const FVector& Position, const EBlockType& NewType)
+{
+	auto Block = Blocks.Find(Position.GridSnap(BlockSize));
+	if (!Block) return;
+
+	*Block = NewType;
+	PotentialBlocks.Add(Position, NewType);
+
+	for (const EFaceDirection& Direction : Directions)
+	{
+		FVector BlockPosition;
+		EBlockType BlockType;
+
+		GetBlockInDirection(Position, Direction, BlockPosition, BlockType);
+
+		PotentialBlocks.Add(BlockPosition, BlockType);
+	}
+
+	EmptyMeshData();
+	CreateChunkMesh();
+}
+
+void AChunk::CreateChunkMesh()
+{
+	CreateChunkMeshData();
+
+	Mesh->CreateMeshSection(
+		0,
+		Vertices,
+		Triangles,
+		Normals,
+		UVs,
+		TArray<FColor>(),
+		TArray<FProcMeshTangent>(),
+		true
+	);
+
+	EmptyMeshData();
+}
+
 void AChunk::CreateChunkMeshData()
 {
-	TArray<EFaceDirection> Directions = {
-		EFaceDirection::X,
-		EFaceDirection::Y,
-		EFaceDirection::nX,
-		EFaceDirection::nY,
-		EFaceDirection::nZ,
-		EFaceDirection::Z,
-	};
-	TArray<FBlock> BlockData;
-	Blocks.GenerateValueArray(BlockData);
+	TArray<FVector> BlockLocs;
+	PotentialBlocks.GenerateKeyArray(BlockLocs);
+	TArray<EBlockType> BlockTypes;
+	PotentialBlocks.GenerateValueArray(BlockTypes);
 
-	for (int i = 0; i < BlockData.Num(); i++)
+	for (int i = 0; i < BlockLocs.Num(); i++)
 	{
-		if (BlockData[i].Type == EBlockType::Air) continue;
+		if (BlockTypes[i] == EBlockType::Air)
+		{
+			PotentialBlocks.Remove(BlockLocs[i]);
+			continue;
+		}
 
+		bool IsFaceCreated = false;
 		for (int j = 0; j < Directions.Num(); j++)
 		{
-			if (!IsBlockNextToAir(Directions[j], BlockData[i].Location)) continue;
+			if (!IsBlockNextToAir(Directions[j], BlockLocs[i])) 
+				continue;
 
-			CreateFaceData(Directions[j], BlockData[i].Location);
+			IsFaceCreated = true;
+			CreateFaceData(Directions[j], BlockLocs[i]);
 		}
+
+		if(!IsFaceCreated)
+			PotentialBlocks.Remove(BlockLocs[i]);
 	}
 }
 
@@ -161,88 +241,23 @@ bool AChunk::IsBlockNextToAir(const EFaceDirection& Direction, const FVector& Po
 	FVector BlockInDirection = (GetDirectionAsValue(Direction) * BlockSize + Position).GridSnap(BlockSize);
 	if (Blocks.Find(BlockInDirection) != nullptr)
 	{
-		return Blocks[BlockInDirection].Type == EBlockType::Air;
+		return Blocks[BlockInDirection] == EBlockType::Air;
 	}
 
 	return Manager.Get()->IsBlockAir(GetActorLocation() + GetDirectionAsValue(Direction) * BlockSize * Width, BlockInDirection);
 }
 
-FVector AChunk::GetDirectionAsValue(const EFaceDirection& Direction) const 
-{
-	TArray<FVector> Directions = {
-		FVector(1, 0, 0),
-		FVector(0, 1, 0),
-		FVector(-1, 0, 0),
-		FVector(0, -1, 0),
-		FVector(0, 0, -1),
-		FVector(0, 0, 1)
-	};
-
-	int32 Index = static_cast<int32>(Direction);
-
-	return Directions[Index];
-}
-
-void AChunk::CreateChunkMesh()
-{
-	CreateChunkMeshData();
-
-	Mesh->CreateMeshSection(
-		0,
-		Vertices, 
-		Triangles, 
-		Normals, 
-		UVs, 
-		TArray<FColor>(), 
-		TArray<FProcMeshTangent>(), 
-		true
-	);
-}
-
-void AChunk::AddBlockFast(const FVector& Position, const EBlockType& NewType)
-{
-	TArray<EFaceDirection> Directions = {
-		EFaceDirection::X,
-		EFaceDirection::Y,
-		EFaceDirection::nX,
-		EFaceDirection::nY,
-		EFaceDirection::nZ,
-		EFaceDirection::Z,
-	};
-
-	auto Block = Blocks.Find(Position.GridSnap(BlockSize));
-	if (!Block) return;
-
-	Block->Type = NewType;
-
-	for (int j = 0; j < Directions.Num(); j++)
-	{
-		if (!IsBlockNextToAir(Directions[j], Block->Location)) continue;
-
-		CreateFaceData(Directions[j], Block->Location);
-	}
-
-	Mesh->CreateMeshSection(
-		0,
-		Vertices,
-		Triangles,
-		Normals,
-		UVs,
-		TArray<FColor>(),
-		TArray<FProcMeshTangent>(),
-		true
-	);
-}
-
-void AChunk::ModifyBlock(const FVector& Position, const EBlockType& NewType)
+void AChunk::AddPotentialBlock(const FVector& Position)
 {
 	auto Block = Blocks.Find(Position.GridSnap(BlockSize));
 	if (!Block) return;
 
-	Block->Type = NewType;
+	PotentialBlocks.Add(Position, *Block);
+}
 
-	ClearMesh();
-	CreateChunkMesh();
+TMap<FVector, EBlockType>& AChunk::GetBlocks()
+{
+	return Blocks;
 }
 
 float AChunk::LimitNoise(float NoiseValue, int MinHeight, int MaxHeight) const
@@ -255,10 +270,42 @@ float AChunk::LimitNoise(float NoiseValue, int MinHeight, int MaxHeight) const
 	return voxelHeight;
 }
 
-void AChunk::ClearMesh()
+void AChunk::GetBlockInDirection(const FVector& Position, const EFaceDirection& Direction, FVector& BlockPosition, EBlockType& BlockType) const
+{
+	FVector BlockInDirection = (GetDirectionAsValue(Direction) * BlockSize + Position).GridSnap(BlockSize);
+	
+	if (!Blocks.Find(BlockInDirection))
+	{
+		Manager->AddPotentialBlockAndRebuild(GetActorLocation() + GetDirectionAsValue(Direction) * BlockSize * Width, BlockInDirection);
+		BlockType = EBlockType::Air;
+		BlockPosition = BlockInDirection;
+		return;
+	}
+
+	BlockType = *Blocks.Find(BlockInDirection);
+	BlockPosition = BlockInDirection;
+}
+
+void AChunk::EmptyMeshData()
 {
 	Vertices.Empty();
 	UVs.Empty();
 	Normals.Empty();
 	Triangles.Empty();
+}
+
+FVector AChunk::GetDirectionAsValue(const EFaceDirection& Direction) const
+{
+	TArray<FVector> Dire = {
+		FVector(1, 0, 0),
+		FVector(0, 1, 0),
+		FVector(-1, 0, 0),
+		FVector(0, -1, 0),
+		FVector(0, 0, -1),
+		FVector(0, 0, 1)
+	};
+
+	int32 Index = static_cast<int32>(Direction);
+
+	return Dire[Index];
 }

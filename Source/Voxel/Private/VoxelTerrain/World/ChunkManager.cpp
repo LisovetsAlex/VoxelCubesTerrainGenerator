@@ -15,6 +15,8 @@ AChunkManager::AChunkManager()
 	ChunkWidth = 32;
 	ChunkHeight = 32;
 
+	ChunkType = AChunk::StaticClass();
+
 	Noise = MakeShared<FastNoiseLite>();
 	Noise->SetFrequency(0.02f);
 	Noise->SetNoiseType(FastNoiseLite::NoiseType_Perlin);
@@ -48,16 +50,23 @@ void AChunkManager::GenerateChunks()
 
 	for (int i = 0; i < ChunkPositions.Num(); i++)
 	{
-		auto Chunk = SpawnChunk(ChunkPositions[i]);
+		auto ChunkActor = SpawnChunk(ChunkPositions[i]);
+		auto Chunk = Cast<IChunkable>(ChunkActor);
 		if (!Chunk) continue;
 
 		Chunk->GenerateChunk(Noise);
 
-		GeneratedChunks.Add(ChunkPositions[i], Chunk);
+		GeneratedChunks.Add(ChunkPositions[i], ChunkActor);
 	}
 
-	TArray<TObjectPtr<AChunk>> Chunks;
-	GeneratedChunks.GenerateValueArray(Chunks);
+	TArray<IChunkable*> Chunks;
+	for (const TPair<FVector, TObjectPtr<AActor>>& Pair : GeneratedChunks)
+	{
+		auto Actor = Cast<IChunkable>(Pair.Value);
+		if (!Actor) continue;
+
+		Chunks.Add(Actor);
+	}
 
 	for (int i = 0; i < Chunks.Num(); i++)
 	{
@@ -67,22 +76,37 @@ void AChunkManager::GenerateChunks()
 
 bool AChunkManager::IsBlockAir(const FVector& ChunkLocation, const FVector& BlockLocation) const
 {
-	auto Chunk = GeneratedChunks.Find(ChunkLocation.GridSnap(BlockSize * DrawDistance));
+	auto ChunkActor = GeneratedChunks.Find(ChunkLocation.GridSnap(BlockSize * DrawDistance));
+	if (!ChunkActor) return false;
+
+	auto Chunk = Cast<IChunkable>(*ChunkActor);
 	if (!Chunk) return false;
 
-	auto Block = Chunk->Get()->Blocks.Find(BlockLocation.GridSnap(BlockSize));
+	auto Block = Chunk->GetBlocks().Find(BlockLocation.GridSnap(BlockSize));
 	if (!Block) return false;
 
-	return Block->Type == EBlockType::Air;
+	return *Block == EBlockType::Air;
+}
+
+void AChunkManager::AddPotentialBlockAndRebuild(const FVector& ChunkLocation, const FVector& BlockPosition)
+{
+	auto ChunkActor = GeneratedChunks.Find(ChunkLocation.GridSnap(BlockSize * DrawDistance));
+	if (!ChunkActor) return;
+
+	auto Chunk = Cast<IChunkable>(*ChunkActor);
+	if (!Chunk) return;
+
+	Chunk->AddPotentialBlock(BlockPosition);
+	Chunk->CreateChunkMesh();
 }
 
 void AChunkManager::AddBlock(const FVector& Position, const EBlockType& NewType)
 {
 	for (auto& Pair : GeneratedChunks)
 	{
-		auto Chunk = Pair.Value;
+		auto Chunk = Cast<IChunkable>(Pair.Value);
 		if (!Chunk) continue;
-		if (!Chunk->Blocks.Find(Position.GridSnap(BlockSize))) continue;
+		if (!Chunk->GetBlocks().Find(Position.GridSnap(BlockSize))) continue;
 
 		Chunk->ModifyBlock(Position, NewType);
 		return;
@@ -93,19 +117,17 @@ void AChunkManager::RemoveBlock(const FVector& Position)
 {
 	for (auto& Pair : GeneratedChunks)
 	{
-		auto Chunk = Pair.Value;
+		auto Chunk = Cast<IChunkable>(Pair.Value);
 		if (!Chunk) continue;
-		if (!Chunk->Blocks.Find(Position.GridSnap(BlockSize))) continue;
+		if (!Chunk->GetBlocks().Find(Position.GridSnap(BlockSize))) continue;
 
 		Chunk->ModifyBlock(Position, EBlockType::Air);
 		return;
 	}
 }
 
-TObjectPtr<AChunk> AChunkManager::SpawnChunk(const FVector& Location)
+TObjectPtr<AActor> AChunkManager::SpawnChunk(const FVector& Location)
 {
-	TSubclassOf<AChunk> ChunkToSpawn = AChunk::StaticClass();
-
 	FVector SpawnLocation = Location;
 	FRotator SpawnRotation = FRotator(0.0f, 0.0f, 0.0f);
 
@@ -116,14 +138,16 @@ TObjectPtr<AChunk> AChunkManager::SpawnChunk(const FVector& Location)
 	UWorld* World = GetWorld();
 	if (!World) return nullptr;
 
-	AChunk* SpawnedActor = World->SpawnActor<AChunk>(ChunkToSpawn, SpawnLocation, SpawnRotation, SpawnParams);
+	AActor* SpawnedActor = World->SpawnActor<AActor>(ChunkType, SpawnLocation, SpawnRotation, SpawnParams);
 	if (!SpawnedActor) return nullptr;
 
-	SpawnedActor->Manager = this;
-	SpawnedActor->Height = ChunkHeight;
-	SpawnedActor->Width = ChunkWidth;
-	SpawnedActor->BlockSize = BlockSize;
+	if (!SpawnedActor->GetClass()->ImplementsInterface(UChunkable::StaticClass())) return nullptr;
 
+	IChunkable* ChunkableActor = Cast<IChunkable>(SpawnedActor);
+	if (!ChunkableActor) return nullptr;
+
+	ChunkableActor->InitBaseData(this, BlockSize, ChunkWidth, ChunkHeight);
+	
 	return SpawnedActor;
 }
 

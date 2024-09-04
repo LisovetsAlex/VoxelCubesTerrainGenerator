@@ -13,9 +13,10 @@ struct FBlock
 		GENERATED_BODY()
 
 		EBlockType Type;
-		FVector Location;
+		uint16 DecorationId;
 
 		FBlock();
-		FBlock(const EBlockType& InType, const FVector& InLocation);
+		FBlock(const EBlockType& InType);
+		FBlock(const EBlockType& InType, uint16 InDecorationId);
 		~FBlock();
 };
