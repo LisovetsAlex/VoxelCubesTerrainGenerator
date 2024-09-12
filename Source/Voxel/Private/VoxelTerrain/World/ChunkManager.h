@@ -8,6 +8,7 @@ class FastNoiseLite;
 class AChunk;
 enum class EBlockType : uint8;
 class IChunkable;
+struct FBlock;
 
 /**
  * Manages chunk actions like drawing, generating, adding/removing blocks
@@ -61,13 +62,25 @@ public:
 	TSubclassOf<AActor> ChunkType;
 
 	/**
+	 * How many chunks can be generated per tick.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ChunkManager")
+	int32 MaxChunksPerTick;
+
+	/**
+	 * How many meshes of chunks can be generated per tick.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ChunkManager")
+	int32 MaxMeshesPerTick;
+
+	/**
 	 * Generates chunks within the defined draw distance around the player.
 	 *
 	 * This function calculates the chunk positions around the player, spawns chunks at those positions,
 	 * generates their terrain using noise, and then creates the mesh for each generated chunk.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "ChunkManager")
-	void GenerateChunks();
+	void RegenerateChunks();
 
 	/**
 	 * Adds a new Block at a specified location.
@@ -82,23 +95,29 @@ public:
 	void RemoveBlock(const FVector& Position);
 
 	/**
-	 * Checks if a block at the given location in a chunk is an air block.
-	 *
-	 * Used in AChunk to create only visible faces.
-	 */
-	bool IsBlockAir(const FVector& ChunkLocation, const FVector& BlockLocation) const;
-
-	/**
 	 * Adds a potential block that might have faces to the chunk and rebuilds chunk mesh.
 	 */
 	void AddPotentialBlockAndRebuild(const FVector& ChunkLocation, const FVector& BlockPosition);
 
+	/**
+	 * Checks if given BlockLocation exists in given Chunk.
+	 */
+	bool IsBlockAir(const FVector& ChunkLocation, const FVector& BlockLocation) const;
+
 protected:
 	TSharedPtr<FastNoiseLite> Noise;
 	TMap<FVector, TObjectPtr<AActor>> GeneratedChunks;
+	TQueue<FVector> ChunkQueue;
+	TQueue<IChunkable*> MeshQueue;
+	TArray<TObjectPtr<AActor>> ChunkPool;
 
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
+	
+	void ProcessMeshGeneration();
+	void ProcessChunkGeneration();
+	void EnqueueChunks(const TArray<FVector>& ChunkPositions);
+	void EnqueueMesh(IChunkable* Chunk);
 
 	/**
 	 * Spawns a chunk at the specified location in the world.

@@ -5,6 +5,7 @@
 #include "UObject/Interface.h"
 #include "Chunkable.generated.h"
 
+struct FBlock;
 class FastNoiseLite;
 class AChunkManager;
 enum class EBlockType : uint8;
@@ -36,9 +37,16 @@ public:
 	virtual void GenerateChunk(const TSharedPtr<FastNoiseLite>& Noise) = 0;
 
 	/**
-	 * Creates the mesh for the chunk using the generated chunk data.
+	 * Creates data for the mesh for the chunk using the generated chunk data.
+	 * 
+	 * Set IsGenerating to true only when for the first generating chunk and mesh
 	 */
-	virtual void CreateChunkMesh() = 0;
+	virtual void CreateChunkMesh(bool IsGenerating) = 0;
+
+	/**
+	 * Appllies the mesh date and creates the mesh.
+	 */
+	virtual void ApplyMesh() = 0;
 
 	/**
 	 * Changes the block type in a chunk.
@@ -54,5 +62,5 @@ public:
 	/**
 	 * Returns all blocks in this chunk.
 	 */
-	virtual TMap<FVector, EBlockType>& GetBlocks() = 0;
+	virtual TMap<FVector, FBlock>& GetBlocks() = 0;
 };

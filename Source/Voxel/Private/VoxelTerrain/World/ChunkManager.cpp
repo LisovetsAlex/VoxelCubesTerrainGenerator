@@ -7,14 +7,13 @@
 
 AChunkManager::AChunkManager()
 {
-	PrimaryActorTick.bCanEverTick = false;
-	PrimaryActorTick.TickInterval = 1.0f;
-
 	DrawDistance = 4;
 	BlockSize = 100;
 	ChunkWidth = 32;
 	ChunkHeight = 32;
 
+	MaxChunksPerTick = 8;
+	MaxMeshesPerTick = 8;
 	ChunkType = AChunk::StaticClass();
 
 	Noise = MakeShared<FastNoiseLite>();
@@ -32,46 +31,121 @@ AChunkManager::AChunkManager()
 void AChunkManager::BeginPlay()
 {
 	Super::BeginPlay();
-
-	GenerateChunks();
 }
 
 void AChunkManager::Tick(float DeltaTime)
 {
-
+	RegenerateChunks();
+	ProcessChunkGeneration();
+	ProcessMeshGeneration();
 }
 
-void AChunkManager::GenerateChunks()
+void AChunkManager::RegenerateChunks()
 {
 	FVector Start = GetPlayerLocation();
 	TArray<FVector> ChunkPositions;
 
 	GetChunkPositions(FVector(Start.X, Start.Y, 0), ChunkPositions);
 
-	for (int i = 0; i < ChunkPositions.Num(); i++)
+	EnqueueChunks(ChunkPositions);
+}
+
+void AChunkManager::ProcessMeshGeneration()
+{
+	int32 MeshesProcessed = 0;
+
+	while (!MeshQueue.IsEmpty() && MeshesProcessed < MaxMeshesPerTick)
 	{
-		auto ChunkActor = SpawnChunk(ChunkPositions[i]);
-		auto Chunk = Cast<IChunkable>(ChunkActor);
-		if (!Chunk) continue;
+		IChunkable* Chunk;
+		if (MeshQueue.Dequeue(Chunk))
+		{
+			AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [this, Chunk]()
+			{
+				Chunk->CreateChunkMesh(true);
 
-		Chunk->GenerateChunk(Noise);
+				AsyncTask(ENamedThreads::GameThread, [Chunk]()
+				{
+					Chunk->ApplyMesh();
+				});
+			});
 
-		GeneratedChunks.Add(ChunkPositions[i], ChunkActor);
+			MeshesProcessed++;
+		}
+	}
+}
+
+void AChunkManager::ProcessChunkGeneration()
+{
+	int32 ChunksProcessed = 0;
+
+	while (!ChunkQueue.IsEmpty() && ChunksProcessed < MaxChunksPerTick)
+	{
+		FVector ChunkPos;
+		if (ChunkQueue.Dequeue(ChunkPos))
+		{
+			auto ChunkActor = SpawnChunk(ChunkPos);
+			auto Chunk = Cast<IChunkable>(ChunkActor);
+			if (!Chunk) continue;
+
+			AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [this, Chunk]()
+			{
+				Chunk->GenerateChunk(Noise);
+
+				AsyncTask(ENamedThreads::GameThread, [this, Chunk]()
+				{
+					EnqueueMesh(Chunk);
+				});
+			});
+
+			GeneratedChunks.Add(ChunkPos, ChunkActor);
+
+			ChunksProcessed++;
+		}
+	}
+}
+
+void AChunkManager::EnqueueChunks(const TArray<FVector>& ChunkPositions)
+{
+	if (!GeneratedChunks.IsEmpty())
+	{
+		TArray<FVector> ChunksToRemove;
+		TArray<FVector> ChunkLocs;
+
+		GeneratedChunks.GenerateKeyArray(ChunkLocs);
+		for (const FVector& ChunkLoc : ChunkLocs)
+		{
+			if (ChunkPositions.Contains(ChunkLoc)) continue;
+			if (GeneratedChunks.Find(ChunkLoc) == nullptr) continue;
+
+			ChunksToRemove.Add(ChunkLoc);
+		}
+
+		for (const FVector& ChunkLoc : ChunksToRemove)
+		{
+			auto ChunkActor = GeneratedChunks.Find(ChunkLoc);
+
+			if (ChunkActor == nullptr) continue;
+			if (ChunkActor->Get() == nullptr) continue;
+				
+			ChunkActor->Get()->Destroy();
+			GeneratedChunks.Remove(ChunkLoc);
+		}
 	}
 
-	TArray<IChunkable*> Chunks;
-	for (const TPair<FVector, TObjectPtr<AActor>>& Pair : GeneratedChunks)
+	for (const FVector& ChunkPos : ChunkPositions)
 	{
-		auto Actor = Cast<IChunkable>(Pair.Value);
-		if (!Actor) continue;
-
-		Chunks.Add(Actor);
+		if (!GeneratedChunks.Contains(ChunkPos))
+		{
+			GeneratedChunks.Add(ChunkPos, nullptr);
+			ChunkQueue.Enqueue(ChunkPos);
+			continue;
+		}
 	}
+}
 
-	for (int i = 0; i < Chunks.Num(); i++)
-	{
-		Chunks[i]->CreateChunkMesh();
-	}
+void AChunkManager::EnqueueMesh(IChunkable* Chunk)
+{
+	MeshQueue.Enqueue(Chunk);
 }
 
 bool AChunkManager::IsBlockAir(const FVector& ChunkLocation, const FVector& BlockLocation) const
@@ -85,7 +159,7 @@ bool AChunkManager::IsBlockAir(const FVector& ChunkLocation, const FVector& Bloc
 	auto Block = Chunk->GetBlocks().Find(BlockLocation.GridSnap(BlockSize));
 	if (!Block) return false;
 
-	return *Block == EBlockType::Air;
+	return Block->Type == EBlockType::Air;
 }
 
 void AChunkManager::AddPotentialBlockAndRebuild(const FVector& ChunkLocation, const FVector& BlockPosition)
@@ -97,7 +171,8 @@ void AChunkManager::AddPotentialBlockAndRebuild(const FVector& ChunkLocation, co
 	if (!Chunk) return;
 
 	Chunk->AddPotentialBlock(BlockPosition);
-	Chunk->CreateChunkMesh();
+	Chunk->CreateChunkMesh(false);
+	Chunk->ApplyMesh();
 }
 
 void AChunkManager::AddBlock(const FVector& Position, const EBlockType& NewType)
@@ -185,5 +260,5 @@ FVector AChunkManager::GetPlayerLocation() const
 	FVector CameraLocation;
 	FRotator CameraRotation;
 	PlayerController->GetPlayerViewPoint(CameraLocation, CameraRotation);
-	return CameraLocation;
+	return CameraLocation.GridSnap(BlockSize * ChunkWidth);
 }

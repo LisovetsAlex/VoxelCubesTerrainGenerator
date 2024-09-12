@@ -6,6 +6,7 @@
 #include "../../Interfaces/Chunkable.h"
 #include "Chunk.generated.h"
 
+struct FBlock;
 enum class EFaceDirection;
 enum class EBlockType : uint8;
 class UProceduralMeshComponent;
@@ -31,13 +32,17 @@ public:
 	UPROPERTY(VisibleAnywhere, Category = "Components")
 	TObjectPtr<USceneComponent> RootSceneComponent;
 
+	UPROPERTY(BlueprintReadWrite, VisibleAnywhere, Category = "Components")
+	TObjectPtr<UProceduralMeshComponent> Mesh;
+
+	TSharedPtr<FastNoiseLite> Noise;
 	TObjectPtr<AChunkManager> Manager;
 	int32 BlockSize;
 	int32 Width;
 	int32 Height;
 
 	//All Blocks in a chunk
-	TMap<FVector, EBlockType> Blocks;
+	TMap<FVector, FBlock> Blocks;
 
 	//Blocks that will most likely have faces
 	TMap<FVector, EBlockType> PotentialBlocks;
@@ -55,12 +60,17 @@ public:
 	/**
 	 * Generates the chunk data based on noise. It does not create the mesh.
 	 */
-	void GenerateChunk(const TSharedPtr<FastNoiseLite>& Noise) override;
+	void GenerateChunk(const TSharedPtr<FastNoiseLite>& InNoise) override;
 
 	/**
-	 * Creates the mesh for the chunk using the generated chunk data.
+	 * Creates the data for the mesh for the chunk using the generated chunk data.
 	 */
-	void CreateChunkMesh() override;
+	void CreateChunkMesh(bool IsGenerating) override;
+
+	/**
+	 * Creates chunk mesh based on data created.
+	 */
+	void ApplyMesh() override;
 
 	/**
 	 * Changes the block type in a chunk.
@@ -76,22 +86,25 @@ public:
 	/**
 	 * Returns all blocks in this chunk.
 	 */
-	TMap<FVector, EBlockType>& GetBlocks() override;
+	TMap<FVector, FBlock>& GetBlocks() override;
+
+	void LogBlocks();
 
 protected:
-	TObjectPtr<UProceduralMeshComponent> Mesh;
-	
 	TArray<FVector> Vertices;
 	TArray<FVector> Normals;
 	TArray<FVector2D> UVs;
 	TArray<int32> Triangles;
+	TArray<FColor> VertexColors;
 
 	TArray<EFaceDirection> Directions;
 
 	/**
 	 * Generates the chunk's mesh data (vertices, triangles, normals, UVs).
 	 */
-	void CreateChunkMeshData();
+	void CreateChunkMeshData(bool IsGenerating);
+
+	void BuildLight();
 
 	/**
 	 * Creates the vertex, normal, and triangle data for a single face of a block.
@@ -99,9 +112,28 @@ protected:
 	void CreateFaceData(const EFaceDirection& Direction, const FVector& Position);
 
 	/**
+	 * Adds all potential blocks in all directions that might have faces around a block position.
+	 */
+	void AddPotentialBlocksAround(const FVector& BlockPosition);
+
+	/**
 	 * Checks whether a block face is adjacent to an air block (empty space).
+	 * 
+	 * Checks it based on Noise. Is only used when generating chunk for the first time.
+	 */
+	bool IsBlockNextToAirFast(const EFaceDirection& Direction, const FVector& Position) const;
+
+	/**
+	 * Checks whether a block face is adjacent to an air block (empty space).
+	 * 
+	 * Checks it based on actuall blocks in chunks.
 	 */
 	bool IsBlockNextToAir(const EFaceDirection& Direction, const FVector& Position) const;
+
+	/**
+	 * Gets the index for FColor from blocktype
+	 */
+	uint8 GetTextureIndex(const EBlockType& Type) const;
 
 	/**
 	 * Gets the vector value representing the direction of a block face.
@@ -116,7 +148,7 @@ protected:
 	/**
 	 * Returns block in given direction relative to certain block.
 	 */
-	void GetBlockInDirection(const FVector& Position, const EFaceDirection& Direction, FVector& BlockPosition, EBlockType& BlockType) const;
+	bool GetBlockInDirection(const FVector& Position, const EFaceDirection& Direction, FBlock& Block) const;
 
 	/**
 	 * Empties arrays with vertex, normal, and triangle data

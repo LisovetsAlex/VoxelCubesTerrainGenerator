@@ -14,9 +14,11 @@ struct FBlock
 
 		EBlockType Type;
 		uint16 DecorationId;
+		uint8 Light;
+		bool IsDestroyable;
 
 		FBlock();
-		FBlock(const EBlockType& InType);
-		FBlock(const EBlockType& InType, uint16 InDecorationId);
+		FBlock(const EBlockType& InType, uint8 InLight, bool InIsDestroyable);
+		FBlock(const EBlockType& InType, uint16 InDecorationId, uint8 InLight, bool InIsDestroyable);
 		~FBlock();
 };
