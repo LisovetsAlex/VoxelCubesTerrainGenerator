@@ -49,6 +49,11 @@ public:
 	virtual void ApplyMesh() = 0;
 
 	/**
+	 * Clear chunk data.
+	 */
+	virtual void ClearChunk() = 0;
+
+	/**
 	 * Changes the block type in a chunk.
 	 */
 	virtual void ModifyBlock(const FVector& Position, const EBlockType& NewType) = 0;

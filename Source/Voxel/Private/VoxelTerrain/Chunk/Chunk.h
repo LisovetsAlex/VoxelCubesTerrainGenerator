@@ -73,6 +73,11 @@ public:
 	void ApplyMesh() override;
 
 	/**
+	 * Destroys chunk, mesh and all the data with it.
+	 */
+	void ClearChunk() override;
+
+	/**
 	 * Changes the block type in a chunk.
 	 */
 	void ModifyBlock(const FVector& Position, const EBlockType& NewType) override;

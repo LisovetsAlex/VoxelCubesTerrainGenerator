@@ -35,7 +35,7 @@ void AChunkManager::BeginPlay()
 	int AmountOfChunks = DrawDistance * 2 * DrawDistance * 2;
 	for (int i = 0; i < AmountOfChunks; i++)
 	{
-
+		ChunkPool.Add(SpawnChunk(FVector(0, 0, 0)));
 	}
 }
 
@@ -93,7 +93,12 @@ void AChunkManager::ProcessChunkGeneration()
 		if (ChunkQueue.Dequeue(ChunkPos))
 		{
 			ChunkQueueLength--;
-			auto ChunkActor = SpawnChunk(ChunkPos);
+
+			if (ChunkPool.IsEmpty()) continue;
+
+			auto ChunkActor = ChunkPool[0];
+			ChunkActor->SetActorLocation(ChunkPos);
+			ChunkPool.RemoveAt(0);
 			auto Chunk = Cast<IChunkable>(ChunkActor);
 			if (!Chunk) continue;
 
@@ -137,8 +142,13 @@ void AChunkManager::EnqueueChunks(const TArray<FVector>& ChunkPositions)
 			if (ChunkActor == nullptr) continue;
 			if (ChunkActor->Get() == nullptr) continue;
 				
-			ChunkActor->Get()->Destroy();
+			ChunkPool.Add(*ChunkActor);
 			GeneratedChunks.Remove(ChunkLoc);
+
+			auto Chunk = Cast<IChunkable>(ChunkActor->Get());
+			if (!Chunk) continue;
+			
+			Chunk->ClearChunk();
 		}
 	}
 

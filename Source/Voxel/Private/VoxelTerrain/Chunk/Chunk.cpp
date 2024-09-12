@@ -134,6 +134,13 @@ void AChunk::ApplyMesh()
 	EmptyMeshData();
 }
 
+void AChunk::ClearChunk()
+{
+	Mesh->ClearMeshSection(0);
+	Blocks.Empty(Width * Width * Height);
+	PotentialBlocks.Empty();
+}
+
 void AChunk::CreateChunkMeshData(bool IsGenerating)
 {
 	TArray<FVector> BlockLocs;
