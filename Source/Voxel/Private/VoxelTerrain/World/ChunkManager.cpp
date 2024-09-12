@@ -20,7 +20,7 @@ AChunkManager::AChunkManager()
 	Noise->SetFrequency(0.02f);
 	Noise->SetNoiseType(FastNoiseLite::NoiseType_Perlin);
 	Noise->SetFractalType(FastNoiseLite::FractalType_FBm);
-	Noise->SetFractalOctaves(5);
+	Noise->SetFractalOctaves(3);
 	Noise->SetFractalLacunarity(2.0f);
 	Noise->SetFractalGain(0.3f); 
 	Noise->SetCellularJitter(0.25f);
@@ -31,10 +31,17 @@ AChunkManager::AChunkManager()
 void AChunkManager::BeginPlay()
 {
 	Super::BeginPlay();
+
+	int AmountOfChunks = DrawDistance * 2 * DrawDistance * 2;
+	for (int i = 0; i < AmountOfChunks; i++)
+	{
+
+	}
 }
 
 void AChunkManager::Tick(float DeltaTime)
 {
+	AdjustGenerateRate();
 	RegenerateChunks();
 	ProcessChunkGeneration();
 	ProcessMeshGeneration();
@@ -59,6 +66,8 @@ void AChunkManager::ProcessMeshGeneration()
 		IChunkable* Chunk;
 		if (MeshQueue.Dequeue(Chunk))
 		{
+			MeshQueueLength--;
+
 			AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [this, Chunk]()
 			{
 				Chunk->CreateChunkMesh(true);
@@ -83,6 +92,7 @@ void AChunkManager::ProcessChunkGeneration()
 		FVector ChunkPos;
 		if (ChunkQueue.Dequeue(ChunkPos))
 		{
+			ChunkQueueLength--;
 			auto ChunkActor = SpawnChunk(ChunkPos);
 			auto Chunk = Cast<IChunkable>(ChunkActor);
 			if (!Chunk) continue;
@@ -138,6 +148,7 @@ void AChunkManager::EnqueueChunks(const TArray<FVector>& ChunkPositions)
 		{
 			GeneratedChunks.Add(ChunkPos, nullptr);
 			ChunkQueue.Enqueue(ChunkPos);
+			ChunkQueueLength++;
 			continue;
 		}
 	}
@@ -145,7 +156,49 @@ void AChunkManager::EnqueueChunks(const TArray<FVector>& ChunkPositions)
 
 void AChunkManager::EnqueueMesh(IChunkable* Chunk)
 {
+	MeshQueueLength++;
 	MeshQueue.Enqueue(Chunk);
+}
+
+void AChunkManager::AdjustGenerateRate()
+{
+	if (ChunkQueueLength >= 600)
+	{
+		MaxChunksPerTick = 32;
+	}
+	else if (ChunkQueueLength >= 300)
+	{
+		MaxChunksPerTick = 16;
+	}
+	else if (ChunkQueueLength >= 100)
+	{
+		MaxChunksPerTick = 8;
+	}
+	else
+	{
+		MaxChunksPerTick = 4;
+	}
+
+	if (MeshQueueLength >= 600)
+	{
+		MaxMeshesPerTick = 16;
+	}
+	else if (MeshQueueLength >= 300)
+	{
+		MaxMeshesPerTick = 8;
+	}
+	else if (MeshQueueLength >= 100)
+	{
+		MaxMeshesPerTick = 4;
+	}
+	else if (MeshQueueLength >= 50)
+	{
+		MaxMeshesPerTick = 2;
+	}
+	else
+	{
+		MaxMeshesPerTick = 1;
+	}
 }
 
 bool AChunkManager::IsBlockAir(const FVector& ChunkLocation, const FVector& BlockLocation) const

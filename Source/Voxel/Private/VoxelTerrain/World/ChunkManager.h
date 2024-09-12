@@ -62,18 +62,6 @@ public:
 	TSubclassOf<AActor> ChunkType;
 
 	/**
-	 * How many chunks can be generated per tick.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ChunkManager")
-	int32 MaxChunksPerTick;
-
-	/**
-	 * How many meshes of chunks can be generated per tick.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ChunkManager")
-	int32 MaxMeshesPerTick;
-
-	/**
 	 * Generates chunks within the defined draw distance around the player.
 	 *
 	 * This function calculates the chunk positions around the player, spawns chunks at those positions,
@@ -107,8 +95,15 @@ public:
 protected:
 	TSharedPtr<FastNoiseLite> Noise;
 	TMap<FVector, TObjectPtr<AActor>> GeneratedChunks;
+
+	uint8 MaxChunksPerTick;
+	uint8 MaxMeshesPerTick;
+
 	TQueue<FVector> ChunkQueue;
+	uint16 ChunkQueueLength;
 	TQueue<IChunkable*> MeshQueue;
+	uint16 MeshQueueLength;
+
 	TArray<TObjectPtr<AActor>> ChunkPool;
 
 	virtual void BeginPlay() override;
@@ -118,6 +113,8 @@ protected:
 	void ProcessChunkGeneration();
 	void EnqueueChunks(const TArray<FVector>& ChunkPositions);
 	void EnqueueMesh(IChunkable* Chunk);
+
+	void AdjustGenerateRate();
 
 	/**
 	 * Spawns a chunk at the specified location in the world.
